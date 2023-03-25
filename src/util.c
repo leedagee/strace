@@ -784,6 +784,47 @@ printpidfd(pid_t pid_of_fd, int fd, const char *path)
 	return true;
 }
 
+static bool
+printsignalfd(pid_t pid, int fd, const char *path)
+{
+	static const char signalfd_path[] = "anon_inode:[signalfd]";
+	static const char sigmask_pfx[] = "sigmask:\t";
+
+	if (strcmp(path, signalfd_path))
+		return false;
+
+	char *result = search_fdinfo(pid, fd, sigmask_pfx, sizeof(sigmask_pfx));
+
+	if (result == NULL)
+		return false;
+
+	size_t sigsetsize = strlen(result) / 2;
+	char *sigsetaddr = xmalloc(sigsetsize);
+
+	for (size_t i = 0; i < sigsetsize; i++) {
+		if (sscanf(result + i * 2, "%02hhx", sigsetaddr +
+#ifndef WORDS_BIGENDIAN
+			     sigsetsize - 1 -
+#endif
+			     i) != 1) {
+			free(sigsetaddr);
+			free(result);
+
+			return false;
+		}
+	}
+
+	free(result);
+
+	tprint_associated_info_begin();
+	tprints_string(sprintsigmask_n("signalfd:", sigsetaddr, sigsetsize));
+	tprint_associated_info_end();
+
+	free(sigsetaddr);
+
+	return true;
+}
+
 static void
 print_quoted_string_in_angle_brackets(const char *str, const bool deleted)
 {
@@ -814,6 +855,9 @@ printfd_pid_with_finfo(struct tcb *tcp, pid_t pid, int fd, const struct finfo *f
 			goto printed;
 		if (is_number_in_set(DECODE_FD_PIDFD, decode_fd_set) &&
 		    printpidfd(pid, fd, path))
+			goto printed;
+		if (is_number_in_set(DECODE_FD_SIGNALFD, decode_fd_set) &&
+		    printsignalfd(pid, fd, path))
 			goto printed;
 		if (is_number_in_set(DECODE_FD_PATH, decode_fd_set))
 			print_quoted_string_in_angle_brackets(path,
